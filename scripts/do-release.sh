@@ -8,6 +8,14 @@ set -e
 . "${DAPPER_SOURCE}/scripts/lib/utils"
 . "${SCRIPTS_DIR}/lib/debug_functions"
 
+### Constants ###
+
+readonly SOURCE_BUNDLE_DIR=${SOURCE_BUNDLE_DIR:-"projects/submariner-operator/packagemanifests"}
+readonly TARGET_BUNDLE_DIR=${TARGET_BUNDLE_DIR:-"projects/community-operators/operators/submariner"}
+readonly TARGET_ORG_UPSTREAM=${TARGET_ORG_UPSTREAM:-"k8s-operatorhub"}
+readonly TARGET_REPO_UPSTREAM=${TARGET_REPO_UPSTREAM:-"${TARGET_ORG_UPSTREAM}/community-operators"}
+readonly PR_TEMPLATE="https://raw.githubusercontent.com/${TARGET_REPO_UPSTREAM}/main/docs/pull_request_template.md"
+
 ### Functions: General ###
 
 function create_release() {
@@ -81,13 +89,15 @@ function push_to_repo() {
 function create_pr() {
     local branch="$1"
     local msg="$2"
-    local base_branch="${release['branch']:-devel}"
+    local title="${3:-${msg}}"
+    local base_branch="${4:-${release['branch']}}"
+    local base_branch="${base_branch:-devel}"
     local to_review
     export GITHUB_TOKEN="${RELEASE_TOKEN}"
 
-    _git commit -a -s -m "${msg}"
+    _git commit -a -s -m "${title}"
     push_to_repo "${branch}"
-    to_review=$(dryrun gh pr create --repo "${ORG}/${project}" --head "${branch}" --base "${base_branch}" --title "${msg}" \
+    to_review=$(dryrun gh pr create --repo "${ORG}/${project}" --head "${branch}" --base "${base_branch}" --title "${title}" \
                 --label "ready-to-test" --body "${msg}")
     dryrun gh pr merge --auto --repo "${ORG}/${project}" --squash "${to_review}" || echo "WARN: Failed to enable auto merge on ${to_review}"
     reviews+=("${to_review}")
@@ -204,6 +214,9 @@ function update_operator_pr() {
     done
 
     sed -i -E "s/(.*Version +=) .*/\1 \"${release['version']#v}\"/" "projects/${project}/apis/submariner/v1alpha1/versions.go"
+    if [[ "${release['pre-release']}" != "true" ]]; then
+        release_bundle
+    fi
     create_pr update_operator "Update Operator to use version ${release['version']}"
 }
 
@@ -244,6 +257,53 @@ function post_reviews_comment() {
     pr_url=$(gh api -H 'Accept: application/vnd.github.groot-preview+json' \
         "repos/:owner/:repo/commits/$(git rev-parse HEAD)/pulls" | jq -r '.[0] | .html_url')
     dryrun gh pr review "${pr_url}" --comment --body "${comment}"
+}
+
+function get_pr_body() {
+   wget "${PR_TEMPLATE}"
+   sed -ir "s/\[ \]/\[x\]/g; 0,/Is operator/d" pull_request_template.md
+   sed -r "1s/^/Release Submariner v$1\n/" pull_request_template.md
+   rm -f pull_request_template.md
+}
+
+function release_bundle() {
+
+    local bundle_version
+    bundle_version="$(echo "${release["version"]}" | cut -d'-' -f1 | cut -c2- | cut -d'.' -f1,2,3)"
+    local bundle_from_version="${release["bundle.from_version"]:-0.0.0}"
+    local bundle_channel="${release["bundle.channel"]:-$(echo alpha-"${bundle_version}" | cut -d'.' -f1,2)}"
+    local pr_body
+    pr_body=$(get_pr_body "${bundle_version}")
+
+    (
+        project=submariner-operator
+        pushd projects/${project}
+        dapper_in_dapper
+
+        make packagemanifests \
+            VERSION="${bundle_version}" \
+            FROM_VERSION="${bundle_from_version}" \
+            CHANNEL="${bundle_channel}"
+    )
+
+    if [ ! -d "${SOURCE_BUNDLE_DIR}/${bundle_version}" ]; then
+        echo "ERROR: The bundle version ${bundle_version} was not found in ${SOURCE_BUNDLE_DIR}/${bundle_version}"
+        exit 1
+    fi
+
+    (
+        project=community-operators
+        ORG="${TARGET_ORG_UPSTREAM}"
+        clone_and_create_branch "submariner-update" "main"
+        cp -r "${SOURCE_BUNDLE_DIR}/${bundle_version}" "${TARGET_BUNDLE_DIR}"
+        cp "${SOURCE_BUNDLE_DIR}/submariner.package.yaml" "${TARGET_BUNDLE_DIR}"
+        pushd projects/${project}
+        tree "${TARGET_BUNDLE_DIR}"
+        create_pr "submariner-update" \
+            "${pr_body}" \
+            "[upstream] Update submariner-operator to ${bundle_version}" \
+            "main"
+    )
 }
 
 ### Main ###

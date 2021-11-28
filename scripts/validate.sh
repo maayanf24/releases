@@ -31,6 +31,14 @@ function _validate_component() {
     fi
 }
 
+function _validate_bundle() {
+    if [[ "$pre_release" != "true" ]]; then
+        _validate 'bundle'
+        _validate 'bundle.from_version'
+        _validate 'bundle.channel'
+    fi
+}
+
 function validate_release_fields() {
     local errors=0
 
@@ -61,6 +69,7 @@ function validate_release_fields() {
     released)
         for project in ${PROJECTS[*]}; do
             _validate_component "${project}"
+            _validate_bundle
         done
         ;;
     *)
