@@ -6,6 +6,7 @@ set -e
 . "${DAPPER_SOURCE}/scripts/lib/image_defs"
 # shellcheck source=scripts/lib/utils
 . "${DAPPER_SOURCE}/scripts/lib/utils"
+# shellcheck disable=SC1091
 . "${SCRIPTS_DIR}/lib/debug_functions"
 
 function _pull_image() {

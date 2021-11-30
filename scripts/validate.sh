@@ -4,6 +4,7 @@ set -e
 
 # shellcheck source=scripts/lib/utils
 . "${DAPPER_SOURCE}/scripts/lib/utils"
+# shellcheck disable=SC1091
 . "${SCRIPTS_DIR}/lib/debug_functions"
 
 ### Functions ###

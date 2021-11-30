@@ -5,6 +5,7 @@ set -e
 
 source "${DAPPER_SOURCE}/scripts/lib/image_defs"
 source "${DAPPER_SOURCE}/scripts/lib/utils"
+# shellcheck disable=SC1091
 source "${SCRIPTS_DIR}/lib/debug_functions"
 
 ORG=submariner-io
